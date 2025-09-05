@@ -7,7 +7,8 @@ import os
 from datetime import datetime
 from telethon import TelegramClient
 
-app = Flask(__name__, template_folder='.')  # <-- التعديل هنا
+# نفس مسار الواجهة كما في الكود السابق
+app = Flask(__name__, template_folder='.')
 app.config['SECRET_KEY'] = 'telegram-gui-secret'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
@@ -50,7 +51,7 @@ def save_settings():
         # حفظ في ملف
         with open("web_settings.json", "w", encoding="utf-8") as f:
             json.dump(current_settings, f, ensure_ascii=False, indent=2)
-            
+        
         log_message("✅ تم حفظ الإعدادات بنجاح")
         return jsonify({"success": True, "message": "تم حفظ الإعدادات"})
     except Exception as e:
@@ -73,54 +74,8 @@ def load_settings():
                 "api_hash": "",
                 "code": "",
                 "password": "",
-                "interval": "5",
-                "message": """🎯 *مركز سرعة إنجاز* 📚💻
-كل ما تحتاجه في *دراستك الجامعية، التقنية، وحتى خدماتك الطبية*… في مكان واحد!
-
-✅ *خدمات أكاديمية وبحثية:*
-
-* إعداد رسائل الماجستير والدكتوراه باحترافية.
-* اقتراح عناوين وخطط بحث متميزة.
-* توفير المراجع والدراسات السابقة.
-* إعداد أبحاث النشر والترقية.
-* التحليل الإحصائي والتدقيق اللغوي.
-
-✅ *خدمات طلابية:*
-
-* حل الواجبات والاختبارات (كويز – ميد – فاينل).
-* تلخيص المقررات.
-* تصميم عروض *PowerPoint* احترافية.
-* إعداد مشاريع التخرج والتقارير.
-
-✅ *خدمات تقنية وبرمجية:*
-
-* تصميم وبرمجة المواقع والمتاجر الإلكترونية.
-* تطوير أنظمة إدارة المهام والهيكل التنظيمي.
-* تحسين محركات البحث (SEO) والدعم الفني.
-
-✅ *خدمات تصميم وترجمة:*
-
-* تصميم السيرة الذاتية والبروشورات.
-* ترجمة معتمدة للمستندات والأبحاث.
-
----
-
-🚨 *سكليفك الطبي… أسرع مما تتخيل!*🚨
-📍 *مركز سرعة إنجاز – خبرة وأمانة وسرعة في خدمتك*
-
-🩺 سواء كنت *عسكري – مدني – طالب*…
-📄 نوفر لك خدمة *استخراج سكليف صحتي* بكل احترافية وفي وقت قياسي، بدون عناء أو تأخير!
-
-✨ *مميزات خدمتنا:*
-✅ سرعة إنجاز غير مسبوقة ⏱
-✅ دقة ومطابقة للمواصفات المطلوبة 📋
-✅ تعامل سري وآمن 100% 🔒
-✅ خدمة في جميع مناطق المملكة 🇸🇦
-
----
-
-📞 *للتواصل والاستفسار:*
-📲 واتساب: *https://wa.me/+966510349663*"""
+                "interval": "5",  # الآن بالثواني
+                "message": "اكتب رسالتك هنا..."
             }
             return jsonify({"success": True, "settings": default_settings})
     except Exception as e:
@@ -134,8 +89,8 @@ def start_sending():
     try:
         current_settings = request.get_json()
         
-        # التحقق من البيانات
-        required_fields = ['phone', 'api_id', 'api_hash', 'code']
+        # التحقق من البيانات (ما عدا الكود لأنه يختفي بعد التشغيل)
+        required_fields = ['phone', 'api_id', 'api_hash']
         for field in required_fields:
             if not current_settings.get(field):
                 return jsonify({"success": False, "error": f"حقل {field} مطلوب"})
@@ -224,11 +179,11 @@ async def telegram_main():
         # إنشاء مجلد الجلسات
         if not os.path.exists("sessions"):
             os.makedirs("sessions")
-            
+        
         phone = current_settings['phone']
         api_id = int(current_settings['api_id'])
         api_hash = current_settings['api_hash']
-        code = current_settings['code']
+        code = current_settings.get('code', '')
         password = current_settings.get('password', '')
         
         session_name = f"sessions/{phone.replace('+', '')}"
@@ -242,13 +197,13 @@ async def telegram_main():
             log_message("🔹 تم إرسال كود التحقق")
             
             try:
-                await client.sign_in(phone, code)
-            except Exception as e:
-                if "password" in str(e).lower() and password:
+                if code:
+                    await client.sign_in(phone, code)
+                elif password:
                     await client.sign_in(password=password)
-                else:
-                    log_message(f"❌ خطأ في التحقق: {str(e)}")
-                    return
+            except Exception as e:
+                log_message(f"❌ خطأ في التحقق: {str(e)}")
+                return
                     
         log_message("✅ تم تسجيل الدخول بنجاح!")
         
@@ -283,19 +238,17 @@ async def continuous_sending():
                     log_message(f"❌ {group}: {str(e)[:50]}...")
                     
                 await asyncio.sleep(2)
-                
+            
             log_message(f"📊 انتهى البث: {success_count}/{len(GROUPS)} رسالة")
             
-            # انتظار الفاصل الزمني
-            interval_minutes = int(current_settings.get('interval', 5))
-            interval_seconds = interval_minutes * 60
-            
-            log_message(f"⏰ انتظار {interval_minutes} دقيقة...")
+            # انتظار الفاصل الزمني (بالثواني)
+            interval_seconds = int(current_settings.get('interval', 5))
+            log_message(f"⏰ انتظار {interval_seconds} ثانية...")
             await asyncio.sleep(interval_seconds)
             
         except Exception as e:
             log_message(f"❌ خطأ في الإرسال: {str(e)}")
-            await asyncio.sleep(60)
+            await asyncio.sleep(10)
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
