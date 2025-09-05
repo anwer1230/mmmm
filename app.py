@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from telethon import TelegramClient
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='.')  # <-- التعديل هنا
 app.config['SECRET_KEY'] = 'telegram-gui-secret'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
