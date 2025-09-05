@@ -1,392 +1,170 @@
-
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>نظام إرسال رسائل تيليجرام - مركز سرعة إنجاز</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8f9fa; }
-        .main-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-        .card { box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); border: none; border-radius: 10px; }
-        .card-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 10px 10px 0 0 !important; }
-        .status-running { color: #28a745; font-weight: bold; }
-        .status-stopped { color: #dc3545; font-weight: bold; }
-        .log-container { background-color: #000; color: #00ff00; font-family: monospace; height: 300px; overflow-y: auto; padding: 10px; border-radius: 5px; }
-        .btn-custom { border-radius: 25px; padding: 10px 30px; font-weight: bold; }
-        .form-control, .form-select { border-radius: 10px; }
-        textarea { resize: vertical; }
-        .alert { border-radius: 10px; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نظام مراقبة وإرسال رسائل تيليجرام</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8f9fa; }
+    .main-container { max-width: 1200px; margin: 20px auto; }
+    .card { box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 10px; }
+    .card-header { background: linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; border-radius:10px 10px 0 0 !important; }
+    .log-container { background-color: #000; color: #00ff00; font-family: monospace; height: 250px; overflow-y:auto; padding:10px; border-radius:5px; }
+    .btn-custom { border-radius: 25px; padding: 10px 30px; font-weight: bold; }
+    .form-control, .form-select { border-radius: 10px; }
+    textarea { resize: vertical; }
+    .status-running { color: #28a745; font-weight:bold; }
+    .status-stopped { color: #dc3545; font-weight:bold; }
+</style>
 </head>
 <body>
-    <div class="container-fluid main-container">
-        <!-- عنوان التطبيق -->
-        <div class="text-center mb-4">
-            <h1 class="display-4 text-primary"><i class="fas fa-robot"></i> نظام إرسال رسائل تيليجرام</h1>
-            <p class="lead text-muted">مركز سرعة إنجاز - نظام التسويق الآلي</p>
-        </div>
+<div class="container-fluid main-container">
+    <div class="text-center mb-4">
+        <h1 class="display-4 text-primary"><i class="fas fa-robot"></i> نظام مراقبة وإرسال رسائل تيليجرام</h1>
+        <p class="lead text-muted">مركز سرعة إنجاز - النظام الآلي</p>
+    </div>
 
-        <div class="row">
-            <!-- الإعدادات والتحكم -->
-            <div class="col-lg-6">
-                <!-- بيانات الاعتماد -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="fas fa-key"></i> بيانات الاعتماد</h5>
+    <div class="row">
+        <div class="col-lg-6">
+            <!-- بيانات الحساب -->
+            <div class="card mb-4">
+                <div class="card-header"><h5><i class="fas fa-key"></i> بيانات الحساب</h5></div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6"><label class="form-label">رقم الهاتف</label><input type="text" class="form-control" id="phone" placeholder="+966123456789"></div>
+                        <div class="col-md-6"><label class="form-label">API ID</label><input type="text" class="form-control" id="api_id" placeholder="1234567"></div>
                     </div>
-                    <div class="card-body">
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <label class="form-label">رقم الهاتف</label>
-                                <input type="text" class="form-control" id="phone" placeholder="+966123456789">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">API ID</label>
-                                <input type="text" class="form-control" id="api_id" placeholder="1234567">
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">API Hash</label>
-                            <input type="text" class="form-control" id="api_hash" placeholder="abc123def456...">
-                        </div>
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <label class="form-label">كود التحقق</label>
-                                <input type="text" class="form-control" id="code" placeholder="12345">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">كلمة المرور (إن وجدت)</label>
-                                <input type="password" class="form-control" id="password" placeholder="كلمة المرور">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- إعدادات الإرسال -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="fas fa-cog"></i> إعدادات الإرسال</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <label class="form-label">الفاصل الزمني (بالدقائق)</label>
-                                <input type="number" class="form-control" id="interval" value="5" min="1">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">حالة النظام</label>
-                                <div class="form-control" style="background-color: #f8f9fa;">
-                                    <span id="status" class="status-stopped">متوقف</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- أزرار التحكم -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="fas fa-play-circle"></i> التحكم</h5>
-                    </div>
-                    <div class="card-body text-center">
-                        <button class="btn btn-success btn-custom me-2" id="startBtn">
-                            <i class="fas fa-rocket"></i> بدء الإرسال
-                        </button>
-                        <button class="btn btn-danger btn-custom me-2" id="stopBtn" disabled>
-                            <i class="fas fa-stop"></i> إيقاف الإرسال
-                        </button>
-                        <button class="btn btn-primary btn-custom me-2" id="saveBtn">
-                            <i class="fas fa-save"></i> حفظ الإعدادات
-                        </button>
-                        <button class="btn btn-warning btn-custom" id="testBtn">
-                            <i class="fas fa-flask"></i> إرسال تجريبي
-                        </button>
+                    <div class="mb-3"><label class="form-label">API Hash</label><input type="text" class="form-control" id="api_hash" placeholder="abc123def456..."></div>
+                    <div class="row mb-3">
+                        <div class="col-md-6"><label class="form-label">كود التحقق</label><input type="text" class="form-control" id="code" placeholder="12345"></div>
+                        <div class="col-md-6"><label class="form-label">كلمة المرور</label><input type="password" class="form-control" id="password" placeholder="إن وجدت"></div>
                     </div>
                 </div>
             </div>
 
-            <!-- الرسالة والسجل -->
-            <div class="col-lg-6">
-                <!-- نص الرسالة -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="fas fa-envelope"></i> نص الرسالة</h5>
+            <!-- إعدادات الإرسال والمراقبة -->
+            <div class="card mb-4">
+                <div class="card-header"><h5><i class="fas fa-cog"></i> إعدادات النظام</h5></div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">المجموعات المستهدفة (افصل بين المجموعات بفاصلة)</label>
+                        <input type="text" class="form-control" id="groups" placeholder="group1,group2,...">
                     </div>
-                    <div class="card-body">
-                        <textarea class="form-control" id="message" rows="15" placeholder="اكتب رسالتك هنا..."></textarea>
+                    <div class="mb-3">
+                        <label class="form-label">مدة الإرسال / المراقبة (بالثواني)</label>
+                        <input type="number" class="form-control" id="interval" value="5" min="1">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">نوع الإرسال</label>
+                        <select class="form-select" id="send_type">
+                            <option value="immediate">فوري</option>
+                            <option value="automatic">تلقائي</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">كلمات المراقبة (افصل بفاصلة)</label>
+                        <input type="text" class="form-control" id="keywords" placeholder="keyword1,keyword2,...">
                     </div>
                 </div>
+            </div>
 
-                <!-- سجل العمليات -->
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="fas fa-list"></i> سجل العمليات</h5>
-                    </div>
-                    <div class="card-body">
-                        <div id="log" class="log-container">
-                            <div>[معلومات] مرحباً بك في نظام إرسال رسائل تيليجرام</div>
-                        </div>
+            <!-- التحكم -->
+            <div class="card mb-4">
+                <div class="card-header"><h5><i class="fas fa-play-circle"></i> التحكم</h5></div>
+                <div class="card-body text-center">
+                    <button class="btn btn-success btn-custom me-2" id="startBtn"><i class="fas fa-rocket"></i> بدء المراقبة</button>
+                    <button class="btn btn-danger btn-custom me-2" id="stopBtn" disabled><i class="fas fa-stop"></i> إيقاف المراقبة</button>
+                    <button class="btn btn-primary btn-custom me-2" id="saveBtn"><i class="fas fa-save"></i> حفظ الإعدادات</button>
+                    <button class="btn btn-warning btn-custom" id="testBtn"><i class="fas fa-flask"></i> إرسال تجريبي</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <!-- نص الرسالة -->
+            <div class="card mb-4">
+                <div class="card-header"><h5><i class="fas fa-envelope"></i> نص الرسالة</h5></div>
+                <div class="card-body">
+                    <textarea class="form-control" id="message" rows="10" placeholder="اكتب رسالتك هنا..."></textarea>
+                </div>
+            </div>
+
+            <!-- سجل العمليات -->
+            <div class="card">
+                <div class="card-header"><h5><i class="fas fa-list"></i> سجل العمليات والتنبيهات</h5></div>
+                <div class="card-body">
+                    <div id="log" class="log-container">
+                        <div>[معلومات] مرحباً بك في النظام</div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- تحديثات فورية -->
-    <div class="toast-container position-fixed bottom-0 end-0 p-3">
-        <div id="toast" class="toast" role="alert">
-            <div class="toast-header">
-                <strong class="me-auto">إشعار</strong>
-                <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
-            </div>
-            <div class="toast-body" id="toastBody">
-                <!-- محتوى الإشعار -->
-            </div>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <script>
-        // إعداد Socket.IO
-        const socket = io();
-        
-        // عناصر الواجهة
-        const elements = {
-            phone: document.getElementById('phone'),
-            api_id: document.getElementById('api_id'),
-            api_hash: document.getElementById('api_hash'),
-            code: document.getElementById('code'),
-            password: document.getElementById('password'),
-            interval: document.getElementById('interval'),
-            message: document.getElementById('message'),
-            status: document.getElementById('status'),
-            log: document.getElementById('log'),
-            startBtn: document.getElementById('startBtn'),
-            stopBtn: document.getElementById('stopBtn'),
-            saveBtn: document.getElementById('saveBtn'),
-            testBtn: document.getElementById('testBtn')
-        };
-
-        // تحميل الإعدادات عند بدء التشغيل
-        window.addEventListener('load', loadSettings);
-
-        // أحداث الأزرار
-        elements.startBtn.addEventListener('click', startSending);
-        elements.stopBtn.addEventListener('click', stopSending);
-        elements.saveBtn.addEventListener('click', saveSettings);
-        elements.testBtn.addEventListener('click', testSend);
-
-        // أحداث Socket.IO
-        socket.on('log_update', function(data) {
-            addLogMessage(data.message);
-        });
-
-        socket.on('status_update', function(data) {
-            updateStatus(data.status);
-        });
-
-        function loadSettings() {
-            fetch('/api/load_settings')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        const settings = data.settings;
-                        elements.phone.value = settings.phone || '';
-                        elements.api_id.value = settings.api_id || '';
-                        elements.api_hash.value = settings.api_hash || '';
-                        elements.code.value = settings.code || '';
-                        elements.password.value = settings.password || '';
-                        elements.interval.value = settings.interval || '5';
-                        elements.message.value = settings.message || '';
-                        addLogMessage('✅ تم تحميل الإعدادات المحفوظة');
-                    }
-                })
-                .catch(error => {
-                    addLogMessage('⚠️ لم يتم العثور على إعدادات محفوظة');
-                });
-        }
-
-        function saveSettings() {
-            const settings = {
-                phone: elements.phone.value,
-                api_id: elements.api_id.value,
-                api_hash: elements.api_hash.value,
-                code: elements.code.value,
-                password: elements.password.value,
-                interval: elements.interval.value,
-                message: elements.message.value
-            };
-
-            fetch('/api/save_settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(settings)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showToast('تم حفظ الإعدادات بنجاح', 'success');
-                } else {
-                    showToast('خطأ في حفظ الإعدادات: ' + data.error, 'danger');
-                }
-            });
-        }
-
-        function startSending() {
-            const settings = {
-                phone: elements.phone.value,
-                api_id: elements.api_id.value,
-                api_hash: elements.api_hash.value,
-                code: elements.code.value,
-                password: elements.password.value,
-                interval: elements.interval.value,
-                message: elements.message.value
-            };
-
-            fetch('/api/start_sending', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(settings)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    elements.startBtn.disabled = true;
-                    elements.stopBtn.disabled = false;
-                    showToast('تم بدء النظام بنجاح', 'success');
-                } else {
-                    showToast('خطأ في بدء النظام: ' + data.error, 'danger');
-                }
-            });
-        }
-
-        function stopSending() {
-            fetch('/api/stop_sending', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    elements.startBtn.disabled = false;
-                    elements.stopBtn.disabled = true;
-                    showToast('تم إيقاف النظام', 'warning');
-                });
-        }
-
-        function testSend() {
-            const settings = {
-                phone: elements.phone.value,
-                api_id: elements.api_id.value,
-                api_hash: elements.api_hash.value,
-                code: elements.code.value,
-                password: elements.password.value,
-                message: elements.message.value
-            };
-
-            fetch('/api/test_send', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(settings)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showToast('جاري الإرسال التجريبي...', 'info');
-                } else {
-                    showToast('خطأ في الإرسال التجريبي: ' + data.error, 'danger');
-                }
-            });
-        }
-
-        function updateStatus(status) {
-            elements.status.textContent = status;
-            elements.status.className = status === 'يعمل' ? 'status-running' : 'status-stopped';
-        }
-
-        function addLogMessage(message) {
-            const logDiv = document.createElement('div');
-            logDiv.textContent = message;
-            elements.log.appendChild(logDiv);
-            elements.log.scrollTop = elements.log.scrollHeight;
-        }
-
-        function showToast(message, type) {
-            const toast = document.getElementById('toast');
-            const toastBody = document.getElementById('toastBody');
-            
-            toastBody.textContent = message;
-            toast.className = `toast bg-${type} text-white`;
-            
-            const bsToast = new bootstrap.Toast(toast);
-            bsToast.show();
-        
-    <!-- ... الكود أعلاه يبقى كما هو ... -->
-
-<!-- سجل العمليات -->
-<div class="card">
-    <div class="card-header">
-        <h5 class="mb-0"><i class="fas fa-list"></i> سجل العمليات والتنبيهات</h5>
-    </div>
-    <div class="card-body">
-        <div id="log" class="log-container">
-            <div>[معلومات] مرحباً بك في نظام إرسال رسائل تيليجرام</div>
-        </div>
-    </div>
-</div>
-
-<!-- تحديثات فورية -->
-<div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastContainer">
-    <!-- إشعارات المراقبة ستظهر هنا -->
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 <script>
-    const socket = io();
+const socket = io();
+const elements = {
+    phone: document.getElementById('phone'),
+    api_id: document.getElementById('api_id'),
+    api_hash: document.getElementById('api_hash'),
+    code: document.getElementById('code'),
+    password: document.getElementById('password'),
+    groups: document.getElementById('groups'),
+    message: document.getElementById('message'),
+    interval: document.getElementById('interval'),
+    send_type: document.getElementById('send_type'),
+    keywords: document.getElementById('keywords'),
+    startBtn: document.getElementById('startBtn'),
+    stopBtn: document.getElementById('stopBtn'),
+    saveBtn: document.getElementById('saveBtn'),
+    testBtn: document.getElementById('testBtn'),
+    log: document.getElementById('log')
+};
 
-    // ... تعريف العناصر والأزرار كما هو ...
+function addLog(message){
+    const div = document.createElement('div');
+    div.textContent = message;
+    elements.log.appendChild(div);
+    elements.log.scrollTop = elements.log.scrollHeight;
+}
 
-    socket.on('log_update', function(data) {
-        addLogMessage(data.message);
-
-        // إذا الرسالة تتضمن ⚠️ فهي تنبيه مراقبة
-        if (data.message.includes('⚠️')) {
-            showToast(data.message, 'warning');
-        }
+// حفظ الإعدادات
+elements.saveBtn.addEventListener('click', () => {
+    fetch('/api/save_settings', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+            phone: elements.phone.value,
+            api_id: elements.api_id.value,
+            api_hash: elements.api_hash.value,
+            code: elements.code.value,
+            password: elements.password.value,
+            groups: elements.groups.value,
+            message: elements.message.value,
+            interval: elements.interval.value,
+            send_type: elements.send_type.value,
+            keywords: elements.keywords.value
+        })
+    }).then(res=>res.json()).then(data=>{
+        addLog(data.success ? '✅ تم حفظ الإعدادات' : '❌ خطأ في الحفظ');
     });
+});
 
-    socket.on('status_update', function(data) {
-        updateStatus(data.status);
+// بدء المراقبة
+elements.startBtn.addEventListener('click', ()=>{
+    fetch('/api/start_monitor',{method:'POST'}).then(res=>res.json()).then(data=>{
+        if(data.success){
+            addLog('🚀 بدء المراقبة');
+            elements.startBtn.disabled = true;
+            elements.stopBtn.disabled = false;
+        } else addLog('❌ '+data.error);
     });
+});
 
-    // ... باقي الوظائف كما هي (addLogMessage, showToast, updateStatus, الخ) ...
-
-    function showToast(message, type) {
-        const toastContainer = document.getElementById('toastContainer');
-
-        // إنشاء عنصر Toast جديد لكل تنبيه
-        const toastEl = document.createElement('div');
-        toastEl.className = `toast align-items-center text-white bg-${type} border-0 mb-2`;
-        toastEl.setAttribute('role', 'alert');
-        toastEl.innerHTML = `
-            <div class="d-flex">
-                <div class="toast-body">${message}</div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
-            </div>
-        `;
-        toastContainer.appendChild(toastEl);
-
-        const bsToast = new bootstrap.Toast(toastEl, { delay: 8000 });
-        bsToast.show();
-
-        // إزالة العنصر بعد انتهاء العرض
-        toastEl.addEventListener('hidden.bs.toast', () => {
-            toastEl.remove();
-        });
-    }
-</script>
-
-    
-</body>
-</html>
+// إيقاف المراقبة
+elements.stopBtn.addEventListener('click', ()=>{
