@@ -1,11 +1,11 @@
 from flask import Flask, session, request, render_template_string
 from flask_socketio import SocketIO, emit, join_room
 from telethon import TelegramClient, events
-import threading, time, os, json, uuid
+import threading, asyncio, os, json, uuid
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 SESSIONS_DIR = "sessions"
 if not os.path.exists(SESSIONS_DIR):
@@ -14,7 +14,7 @@ if not os.path.exists(SESSIONS_DIR):
 USERS = {}
 
 # ===========================
-# وظائف حفظ واسترجاع البيانات
+# حفظ واسترجاع الإعدادات
 # ===========================
 def save_settings(user_id, settings):
     path = os.path.join(SESSIONS_DIR, f"{user_id}.json")
@@ -29,32 +29,39 @@ def load_settings(user_id):
     return {}
 
 # ===========================
-# وظيفة المراقبة لكل مستخدم
+# مهمة المراقبة لكل مستخدم
 # ===========================
 def monitoring_task(user_id):
     user_data = USERS[user_id]
     client = user_data['client']
     settings = user_data['settings']
 
-    @client.on(events.NewMessage)
-    async def handler(event):
-        msg = event.message.message
-        for word in settings.get("watch_words", []):
-            if word in msg:
-                await client.send_message('me', f"🔔 رصدت كلمة: {word}")
-                socketio.emit('log_update', {"message": f"🔔 رصدت كلمة: {word}"}, room=user_id)
-        socketio.emit('log_update', {"message": f"📩 {event.chat_id}: {msg}"}, room=user_id)
+    async def async_monitor():
+        @client.on(events.NewMessage)
+        async def handler(event):
+            msg = event.message.message
+            for word in settings.get("watch_words", []):
+                if word in msg:
+                    await client.send_message('me', f"🔔 رصدت كلمة: {word}")
+                    socketio.emit('log_update', {"message": f"🔔 رصدت كلمة: {word}"}, room=user_id)
+            socketio.emit('log_update', {"message": f"📩 {event.chat_id}: {msg}"}, room=user_id)
 
-    client.start()
-    while user_data['is_running']:
-        if settings.get("send_type") == "automatic":
-            for group in settings.get("groups", []):
-                try:
-                    client.send_message(group, settings.get("message",""))
-                    socketio.emit('log_update', {"message": f"🚀 أرسلت رسالة إلى {group}"}, room=user_id)
-                except Exception as e:
-                    socketio.emit('log_update', {"message": f"❌ {group}: {str(e)}"}, room=user_id)
-        time.sleep(int(settings.get("interval_seconds", 60)))
+        await client.start(phone=settings['phone'], password=settings.get('password'))
+        socketio.emit('log_update', {"message": "✅ تم تسجيل الدخول"}, room=user_id)
+
+        while user_data['is_running']:
+            if settings.get("send_type") == "automatic":
+                for group in settings.get("groups", []):
+                    try:
+                        await client.send_message(group, settings.get("message",""))
+                        socketio.emit('log_update', {"message": f"🚀 أرسلت رسالة إلى {group}"}, room=user_id)
+                    except Exception as e:
+                        socketio.emit('log_update', {"message": f"❌ {group}: {str(e)}"}, room=user_id)
+            await asyncio.sleep(int(settings.get("interval_seconds", 60)))
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(async_monitor())
 
 # ===========================
 # الراوتات
@@ -109,6 +116,28 @@ def api_stop_monitoring():
         return {"success": True, "message": "⏹ تم إيقاف المراقبة"}
     return {"success": False, "message": "❌ لم يتم تشغيل النظام"}
 
+@app.route("/api/send_now", methods=["POST"])
+def api_send_now():
+    user_id = session['user_id']
+    if user_id not in USERS:
+        return {"success": False, "message": "❌ لم تحفظ البيانات بعد"}
+    settings = USERS[user_id]['settings']
+    client = USERS[user_id]['client']
+
+    async def send_all():
+        await client.start(phone=settings['phone'], password=settings.get('password'))
+        for group in settings.get("groups", []):
+            try:
+                await client.send_message(group, settings.get("message",""))
+                socketio.emit('log_update', {"message": f"🚀 أرسلت رسالة إلى {group}"}, room=user_id)
+            except Exception as e:
+                socketio.emit('log_update', {"message": f"❌ {group}: {str(e)}"}, room=user_id)
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(send_all())
+    return {"success": True, "message": "✅ تم إرسال الرسائل فوري"}
+
 # ===========================
 # SocketIO
 # ===========================
@@ -146,17 +175,13 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-
         <input class="form-control mb-2" id="api_hash" placeholder="API Hash">
         <input class="form-control mb-2" id="password" placeholder="كلمة المرور (إن وجدت)">
         <button class="btn btn-primary btn-custom mb-2" id="loginBtn">موافق</button>
-        <div id="codeContainer" style="display:none;">
-            <input class="form-control mb-2" id="code" placeholder="كود التحقق">
-            <button class="btn btn-success btn-custom" id="codeBtn">موافق</button>
-        </div>
     </div>
     <div class="card p-3 mt-3">
         <h4>إعدادات النظام</h4>
         <textarea class="form-control mb-2" id="message" placeholder="نص الرسالة"></textarea>
-        <textarea class="form-control mb-2" id="groups" placeholder="روابط المجموعات"></textarea>
+        <textarea class="form-control mb-2" id="groups" placeholder="روابط المجموعات (افصل بينهم بفواصل)"></textarea>
         <input class="form-control mb-2" id="interval" type="number" value="60" placeholder="الفترة الزمنية">
-        <input class="form-control mb-2" id="keywords" placeholder="كلمات المراقبة">
+        <input class="form-control mb-2" id="keywords" placeholder="كلمات المراقبة (افصل بينهم بفواصل)">
         <button class="btn btn-primary btn-custom mb-2" id="saveBtn">حفظ البيانات</button>
         <button class="btn btn-success btn-custom mb-2" id="sendNowBtn">إرسال فوري</button>
         <button class="btn btn-info btn-custom mb-2" id="sendAutoBtn">إرسال تلقائي</button>
@@ -202,6 +227,11 @@ document.getElementById('stopBtn').onclick = ()=>{
     fetch('/api/stop_monitoring',{method:'POST'}).then(r=>r.json()).then(d=>addLog(d.message))
 }
 
+// إرسال فوري
+document.getElementById('sendNowBtn').onclick = ()=>{
+    fetch('/api/send_now',{method:'POST'}).then(r=>r.json()).then(d=>addLog(d.message))
+}
+
 // تحديث السجل من السيرفر
 socket.on('log_update', data => addLog(data.message))
 </script>
@@ -209,5 +239,8 @@ socket.on('log_update', data => addLog(data.message))
 </html>
 """
 
+# ===========================
+# تشغيل السيرفر
+# ===========================
 if __name__ == "__main__":
     socketio.run(app, host='0.0.0.0', port=5000, debug=True)
