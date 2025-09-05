@@ -1,6 +1,6 @@
-flask
-flask-socketio
-telethon
-gevent
-gevent-websocket
-eventlet
+Flask==2.3.4
+Flask-SocketIO==6.7.2
+telethon==1.29.0
+eventlet==0.33.3
+gunicorn==21.2.0
+gevent==22.10.2
