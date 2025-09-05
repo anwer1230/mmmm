@@ -15,8 +15,6 @@
     .btn-custom { border-radius: 25px; padding: 10px 30px; font-weight: bold; }
     .form-control, .form-select { border-radius: 10px; }
     textarea { resize: vertical; }
-    .status-running { color: #28a745; font-weight:bold; }
-    .status-stopped { color: #dc3545; font-weight:bold; }
 </style>
 </head>
 <body>
@@ -133,8 +131,49 @@ function addLog(message){
     elements.log.scrollTop = elements.log.scrollHeight;
 }
 
+// تحديث السجل من SocketIO
+socket.on('log_update', data => addLog(data.message));
+
 // حفظ الإعدادات
 elements.saveBtn.addEventListener('click', () => {
+    fetch('/api/save_settings', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+            phone: elements.phone.value,
+            api_id: elements.api_id.value,
+            api_hash: elements.api_hash.value,
+            code: elements.code.value,
+            password: elements.password.value,
+            groups: elements.groups.value.split(','),
+            message: elements.message.value,
+            interval_seconds: elements.interval.value,
+            send_type: elements.send_type.value,
+            watch_words: elements.keywords.value.split(',')
+        })
+    }).then(res=>res.json()).then(data=>{
+        addLog(data.success ? '✅ تم حفظ الإعدادات' : '❌ خطأ في الحفظ');
+    });
+});
+
+// بدء المراقبة
+elements.startBtn.addEventListener('click', ()=>{
+    fetch('/api/start_monitoring',{
+        method:'POST',
+        headers:{
+// إيقاف المراقبة
+elements.stopBtn.addEventListener('click', ()=>{
+    fetch('/api/stop_monitoring', {method:'POST'}).then(res=>res.json()).then(data=>{
+        if(data.success){
+            addLog('🛑 تم إيقاف المراقبة');
+            elements.startBtn.disabled = false;
+            elements.stopBtn.disabled = true;
+        } else addLog('❌ خطأ في الإيقاف');
+    });
+});
+
+// إرسال تجريبي
+elements.testBtn.addEventListener('click', ()=>{
     fetch('/api/save_settings', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
@@ -151,20 +190,35 @@ elements.saveBtn.addEventListener('click', () => {
             keywords: elements.keywords.value
         })
     }).then(res=>res.json()).then(data=>{
-        addLog(data.success ? '✅ تم حفظ الإعدادات' : '❌ خطأ في الحفظ');
-    });
-});
-
-// بدء المراقبة
-elements.startBtn.addEventListener('click', ()=>{
-    fetch('/api/start_monitor',{method:'POST'}).then(res=>res.json()).then(data=>{
         if(data.success){
-            addLog('🚀 بدء المراقبة');
-            elements.startBtn.disabled = true;
-            elements.stopBtn.disabled = false;
-        } else addLog('❌ '+data.error);
+            addLog('✅ تم حفظ الإعدادات للإرسال التجريبي');
+            fetch('/api/start_monitoring', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({
+                    phone: elements.phone.value,
+                    api_id: elements.api_id.value,
+                    api_hash: elements.api_hash.value,
+                    code: elements.code.value,
+                    password: elements.password.value,
+                    groups: elements.groups.value.split(','),
+                    message: elements.message.value,
+                    interval_seconds: elements.interval.value,
+                    send_type: elements.send_type.value,
+                    watch_words: elements.keywords.value.split(',')
+                })
+            }).then(res=>res.json()).then(data=>{
+                if(data.success) addLog('🚀 تم الإرسال التجريبي بنجاح');
+                else addLog('❌ خطأ في الإرسال التجريبي: '+data.error);
+            });
+        } else addLog('❌ خطأ في الحفظ قبل الإرسال التجريبي');
     });
 });
 
-// إيقاف المراقبة
-elements.stopBtn.addEventListener('click', ()=>{
+// استقبال التحديثات من السيرفر وعرضها في السجل
+socket.on('log_update', (data)=>{
+    if(data.message) addLog(data.message);
+});
+</script>
+</body>
+</html>
