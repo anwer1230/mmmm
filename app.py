@@ -5,9 +5,9 @@ import threading
 import json
 import os
 from datetime import datetime
-from telethon import TelegramClient
+from telethon import TelegramClient, events
 
-# نفس مسار الواجهة كما في الكود السابق
+# مسار الواجهة مثل الكود الأصلي
 app = Flask(__name__, template_folder='.')
 app.config['SECRET_KEY'] = 'telegram-gui-secret'
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -17,7 +17,14 @@ client = None
 is_running = False
 current_settings = {}
 
-# المجموعات المستهدفة
+# الكلمات المراد مراقبتها
+WATCH_WORDS = [
+    "اريد مساعدة","عندي واجب","من يسوي سكليف","حل واجب","مساعدة","واجبات",
+    "بحث","تقرير","مشروع","اسايمنت","ابي مساعدة","عندي اختبار","من يقدر",
+    "تعرفون شخص","محتاج مساعدة","بحث جامعي","تصميم","برمجة","ترجمة","كتابة محتوى"
+]
+
+# المجموعات المستهدفة للبث
 GROUPS = [
     "skdjfu", "Maths_genius2", "mtager545", "sultanu1999", "salla_pool",
     "Taif64", "groupIAU", "universty_taif11", "ksucpy", "Tu_English2",
@@ -47,11 +54,9 @@ def save_settings():
     global current_settings
     try:
         current_settings = request.get_json()
-        
         # حفظ في ملف
         with open("web_settings.json", "w", encoding="utf-8") as f:
             json.dump(current_settings, f, ensure_ascii=False, indent=2)
-        
         log_message("✅ تم حفظ الإعدادات بنجاح")
         return jsonify({"success": True, "message": "تم حفظ الإعدادات"})
     except Exception as e:
@@ -67,14 +72,13 @@ def load_settings():
                 settings = json.load(f)
             return jsonify({"success": True, "settings": settings})
         else:
-            # إعدادات افتراضية
             default_settings = {
                 "phone": "",
                 "api_id": "",
                 "api_hash": "",
-                "code": "",
+                "code": "",  # هذه الخانة لن تظهر أثناء التشغيل
                 "password": "",
-                "interval": "5",  # الآن بالثواني
+                "interval": "5",  # الوقت بالثواني
                 "message": "اكتب رسالتك هنا..."
             }
             return jsonify({"success": True, "settings": default_settings})
@@ -85,29 +89,20 @@ def load_settings():
 def start_sending():
     """بدء الإرسال"""
     global is_running, current_settings
-    
     try:
         current_settings = request.get_json()
-        
-        # التحقق من البيانات (ما عدا الكود لأنه يختفي بعد التشغيل)
         required_fields = ['phone', 'api_id', 'api_hash']
         for field in required_fields:
             if not current_settings.get(field):
                 return jsonify({"success": False, "error": f"حقل {field} مطلوب"})
-        
         if is_running:
             return jsonify({"success": False, "error": "النظام يعمل بالفعل"})
-        
         is_running = True
         update_status("يعمل")
         log_message("🚀 بدء نظام الإرسال...")
-        
-        # تشغيل في خيط منفصل
         thread = threading.Thread(target=run_telegram_client, daemon=True)
         thread.start()
-        
         return jsonify({"success": True, "message": "تم بدء النظام"})
-        
     except Exception as e:
         log_message(f"❌ خطأ في بدء النظام: {str(e)}")
         return jsonify({"success": False, "error": str(e)})
@@ -116,20 +111,16 @@ def start_sending():
 def stop_sending():
     """إيقاف الإرسال"""
     global is_running, client
-    
     try:
         is_running = False
         update_status("متوقف")
         log_message("⏹️ تم إيقاف النظام")
-        
         if client:
             try:
                 asyncio.create_task(client.disconnect())
             except:
                 pass
-                
         return jsonify({"success": True, "message": "تم إيقاف النظام"})
-        
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
@@ -137,21 +128,14 @@ def stop_sending():
 def test_send():
     """إرسال تجريبي"""
     global client, current_settings
-    
     try:
         if not client:
             return jsonify({"success": False, "error": "يجب تسجيل الدخول أولاً"})
-        
         current_settings = request.get_json()
-        
-        # إرسال للمجموعة الأولى فقط
         test_group = "Maths_genius2"
-        
         thread = threading.Thread(target=send_test_message, args=(test_group,), daemon=True)
         thread.start()
-        
         return jsonify({"success": True, "message": "جاري الإرسال التجريبي..."})
-        
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
@@ -164,7 +148,6 @@ def send_test_message(group):
             log_message(f"✅ تم إرسال رسالة تجريبية إلى {group}")
         except Exception as e:
             log_message(f"❌ فشل الإرسال التجريبي: {str(e)}")
-    
     asyncio.run(_send())
 
 def run_telegram_client():
@@ -174,28 +157,21 @@ def run_telegram_client():
 async def telegram_main():
     """الدالة الرئيسية لتيليجرام"""
     global client
-    
     try:
-        # إنشاء مجلد الجلسات
         if not os.path.exists("sessions"):
             os.makedirs("sessions")
-        
         phone = current_settings['phone']
         api_id = int(current_settings['api_id'])
         api_hash = current_settings['api_hash']
         code = current_settings.get('code', '')
         password = current_settings.get('password', '')
-        
         session_name = f"sessions/{phone.replace('+', '')}"
         client = TelegramClient(session_name, api_id, api_hash)
-        
         log_message("🔹 جاري الاتصال بتيليجرام...")
         await client.connect()
-        
         if not await client.is_user_authorized():
             await client.send_code_request(phone)
             log_message("🔹 تم إرسال كود التحقق")
-            
             try:
                 if code:
                     await client.sign_in(phone, code)
@@ -204,12 +180,23 @@ async def telegram_main():
             except Exception as e:
                 log_message(f"❌ خطأ في التحقق: {str(e)}")
                 return
-                    
         log_message("✅ تم تسجيل الدخول بنجاح!")
-        
+
+        # ----- إضافة المراقبة لكامل الحساب -----
+        @client.on(events.NewMessage())
+        async def handler(event):
+            message_text = event.message.message.lower()
+            for word in WATCH_WORDS:
+                if word.lower() in message_text:
+                    sender = getattr(event.chat, 'title', None) or getattr(event.chat, 'username', None) or "محادثة خاصة"
+                    alert_msg = f"⚠️ كلمة '{word}' تم ذكرها في {sender}\n\nالمحتوى: {event.message.message}"
+                    log_message(alert_msg)
+                    await client.send_message('me', alert_msg)
+                    break
+
         # بدء الإرسال المستمر
         await continuous_sending()
-        
+
     except Exception as e:
         log_message(f"❌ خطأ في النظام: {str(e)}")
     finally:
@@ -219,33 +206,25 @@ async def telegram_main():
 async def continuous_sending():
     """الإرسال المستمر للرسائل"""
     global is_running
-    
     while is_running:
         try:
             message = current_settings.get('message', '')
             log_message(f"🚀 بدء البث إلى {len(GROUPS)} مجموعة...")
-            
             success_count = 0
             for group in GROUPS:
                 if not is_running:
                     break
-                    
                 try:
                     await client.send_message(group, message, parse_mode='markdown')
                     log_message(f"✅ {group}")
                     success_count += 1
                 except Exception as e:
                     log_message(f"❌ {group}: {str(e)[:50]}...")
-                    
                 await asyncio.sleep(2)
-            
             log_message(f"📊 انتهى البث: {success_count}/{len(GROUPS)} رسالة")
-            
-            # انتظار الفاصل الزمني (بالثواني)
             interval_seconds = int(current_settings.get('interval', 5))
             log_message(f"⏰ انتظار {interval_seconds} ثانية...")
             await asyncio.sleep(interval_seconds)
-            
         except Exception as e:
             log_message(f"❌ خطأ في الإرسال: {str(e)}")
             await asyncio.sleep(10)
