@@ -3,3 +3,4 @@ flask-socketio
 telethon
 gevent
 gevent-websocket
+eventlet
