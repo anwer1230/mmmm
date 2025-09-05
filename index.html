@@ -320,7 +320,73 @@
             
             const bsToast = new bootstrap.Toast(toast);
             bsToast.show();
+        
+    <!-- ... الكود أعلاه يبقى كما هو ... -->
+
+<!-- سجل العمليات -->
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="fas fa-list"></i> سجل العمليات والتنبيهات</h5>
+    </div>
+    <div class="card-body">
+        <div id="log" class="log-container">
+            <div>[معلومات] مرحباً بك في نظام إرسال رسائل تيليجرام</div>
+        </div>
+    </div>
+</div>
+
+<!-- تحديثات فورية -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastContainer">
+    <!-- إشعارات المراقبة ستظهر هنا -->
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+<script>
+    const socket = io();
+
+    // ... تعريف العناصر والأزرار كما هو ...
+
+    socket.on('log_update', function(data) {
+        addLogMessage(data.message);
+
+        // إذا الرسالة تتضمن ⚠️ فهي تنبيه مراقبة
+        if (data.message.includes('⚠️')) {
+            showToast(data.message, 'warning');
         }
-    </script>
+    });
+
+    socket.on('status_update', function(data) {
+        updateStatus(data.status);
+    });
+
+    // ... باقي الوظائف كما هي (addLogMessage, showToast, updateStatus, الخ) ...
+
+    function showToast(message, type) {
+        const toastContainer = document.getElementById('toastContainer');
+
+        // إنشاء عنصر Toast جديد لكل تنبيه
+        const toastEl = document.createElement('div');
+        toastEl.className = `toast align-items-center text-white bg-${type} border-0 mb-2`;
+        toastEl.setAttribute('role', 'alert');
+        toastEl.innerHTML = `
+            <div class="d-flex">
+                <div class="toast-body">${message}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        `;
+        toastContainer.appendChild(toastEl);
+
+        const bsToast = new bootstrap.Toast(toastEl, { delay: 8000 });
+        bsToast.show();
+
+        // إزالة العنصر بعد انتهاء العرض
+        toastEl.addEventListener('hidden.bs.toast', () => {
+            toastEl.remove();
+        });
+    }
+</script>
+
+    
 </body>
 </html>
