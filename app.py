@@ -41,7 +41,7 @@ def init_telegram(settings):
             settings['api_id'], 
             settings['api_hash']
         )
-        tg_client.start(phone=settings['phone'], password=settings['password'], code_callback=lambda: settings['code'])
+        tg_client.start(phone=settings['phone'], password=settings.get('password', None), code_callback=lambda: settings['code'])
 
 # -----------------------------
 # وظيفة المراقبة/الإرسال
@@ -50,21 +50,35 @@ def start_monitoring(settings):
     global is_running
     init_telegram(settings)
 
+    send_type = settings.get("send_type", "automatic")
+    
+    if send_type == "immediate":
+        # إرسال الرسالة مرة واحدة فقط
+        groups = settings.get("groups", [])
+        message = settings.get("message", "")
+        for group in groups:
+            try:
+                tg_client.send_message(group, message)
+                socketio.emit('log_update', {"message": f"🚀 تم إرسال الرسالة الفورية إلى {group}"})
+            except Exception as e:
+                socketio.emit('log_update', {"message": f"❌ {group}: {str(e)}"})
+        is_running = False
+        return
+
+    # إذا كان تلقائي
     while is_running:
         groups = settings.get("groups", [])
         message = settings.get("message", "")
         watch_words = settings.get("watch_words", [])
         interval = int(settings.get("interval_seconds", 5))
 
-        # إرسال الرسائل إلى المجموعات
         for group in groups:
             try:
                 tg_client.send_message(group, message)
                 socketio.emit('log_update', {"message": f"🚀 تم إرسال الرسالة إلى {group}"})
             except Exception as e:
                 socketio.emit('log_update', {"message": f"❌ {group}: {str(e)}"})
-        
-        # إرسال التنبيهات الخاصة إلى الحساب نفسه
+
         for word in watch_words:
             try:
                 tg_client.send_message('me', f"🔔 تم رصد كلمة المراقبة: {word}")
