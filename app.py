@@ -1,226 +1,213 @@
-# app.py (ملف واحد: الواجهة + الخلفية)
-from flask import Flask, request, session
-from flask_socketio import SocketIO, emit, join_room, leave_room
-from telethon import TelegramClient
-import threading
-import time
-import uuid
+from flask import Flask, session, request, render_template_string
+from flask_socketio import SocketIO, emit, join_room
+from telethon import TelegramClient, events
+import threading, time, os, json, uuid
 
-# -----------------------------
-# بيانات التطبيق
-# -----------------------------
 app = Flask(__name__)
-app.secret_key = "YOUR_SECRET_KEY_HERE"  # لتخزين جلسة المستخدم
+app.secret_key = os.urandom(24)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
-# تخزين الجلسات: كل مستخدم له مفتاح فريد
-user_sessions = {}
+SESSIONS_DIR = "sessions"
+if not os.path.exists(SESSIONS_DIR):
+    os.makedirs(SESSIONS_DIR)
 
-# -----------------------------
-# وظائف Telegram
-# -----------------------------
-def init_telegram(user_id, settings):
-    client = TelegramClient(f"sessions/{user_id}", settings['api_id'], settings['api_hash'])
-    return client
+USERS = {}
 
-def start_monitoring(user_id):
-    settings = user_sessions[user_id]['settings']
-    client = user_sessions[user_id]['tg_client']
-    interval = int(settings.get("interval_seconds", 5))
-    groups = settings.get("groups", [])
-    message = settings.get("message", "")
-    watch_words = settings.get("watch_words", [])
+# ===========================
+# وظائف حفظ واسترجاع البيانات
+# ===========================
+def save_settings(user_id, settings):
+    path = os.path.join(SESSIONS_DIR, f"{user_id}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=4)
 
-    while user_sessions[user_id]['running']:
-        # إرسال الرسائل إلى المجموعات
-        for group in groups:
-            try:
-                client.send_message(group, message)
-                socketio.emit('log_update', {"message": f"🚀 تم إرسال الرسالة إلى {group}"}, room=user_id)
-            except Exception as e:
-                socketio.emit('log_update', {"message": f"❌ {group}: {str(e)}"}, room=user_id)
+def load_settings(user_id):
+    path = os.path.join(SESSIONS_DIR, f"{user_id}.json")
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
-        # إرسال التنبيهات إلى الحساب نفسه
-        for word in watch_words:
-            try:
-                client.send_message('me', f"🔔 تم رصد كلمة المراقبة: {word}")
-                socketio.emit('log_update', {"message": f"🔔 تم إرسال التنبيه إلى حسابك الشخصي: {word}"}, room=user_id)
-            except Exception as e:
-                socketio.emit('log_update', {"message": f"❌ خطأ في إرسال التنبيه: {str(e)}"}, room=user_id)
+# ===========================
+# وظيفة المراقبة لكل مستخدم
+# ===========================
+def monitoring_task(user_id):
+    user_data = USERS[user_id]
+    client = user_data['client']
+    settings = user_data['settings']
 
-        time.sleep(interval)
+    @client.on(events.NewMessage)
+    async def handler(event):
+        msg = event.message.message
+        for word in settings.get("watch_words", []):
+            if word in msg:
+                await client.send_message('me', f"🔔 رصدت كلمة: {word}")
+                socketio.emit('log_update', {"message": f"🔔 رصدت كلمة: {word}"}, room=user_id)
+        socketio.emit('log_update', {"message": f"📩 {event.chat_id}: {msg}"}, room=user_id)
 
-# -----------------------------
+    client.start()
+    while user_data['is_running']:
+        if settings.get("send_type") == "automatic":
+            for group in settings.get("groups", []):
+                try:
+                    client.send_message(group, settings.get("message",""))
+                    socketio.emit('log_update', {"message": f"🚀 أرسلت رسالة إلى {group}"}, room=user_id)
+                except Exception as e:
+                    socketio.emit('log_update', {"message": f"❌ {group}: {str(e)}"}, room=user_id)
+        time.sleep(int(settings.get("interval_seconds", 60)))
+
+# ===========================
 # الراوتات
-# -----------------------------
+# ===========================
 @app.route("/")
 def index():
-    # إنشاء معرف جلسة فريد لكل مستخدم
     if 'user_id' not in session:
         session['user_id'] = str(uuid.uuid4())
     user_id = session['user_id']
-    if user_id not in user_sessions:
-        user_sessions[user_id] = {
-            'settings': {},
-            'tg_client': None,
-            'running': False,
-            'thread': None
+    return render_template_string(INDEX_HTML, user_id=user_id)
+
+@app.route("/api/save_settings", methods=["POST"])
+def api_save_settings():
+    user_id = session['user_id']
+    settings = request.json
+    save_settings(user_id, settings)
+    try:
+        client = TelegramClient(
+            os.path.join(SESSIONS_DIR, user_id),
+            int(settings['api_id']),
+            settings['api_hash']
+        )
+        USERS[user_id] = {
+            'client': client,
+            'settings': settings,
+            'thread': None,
+            'is_running': False
         }
-    return """
+        return {"success": True, "message": "✅ تم حفظ البيانات"}
+    except Exception as e:
+        return {"success": False, "message": f"❌ خطأ: {str(e)}"}
+
+@app.route("/api/start_monitoring", methods=["POST"])
+def api_start_monitoring():
+    user_id = session['user_id']
+    if user_id not in USERS:
+        return {"success": False, "message": "❌ لم تحفظ البيانات بعد"}
+    user_data = USERS[user_id]
+    if user_data['is_running']:
+        return {"success": False, "message": "❌ النظام يعمل بالفعل"}
+    user_data['is_running'] = True
+    thread = threading.Thread(target=monitoring_task, args=(user_id,))
+    thread.start()
+    user_data['thread'] = thread
+    return {"success": True, "message": "🚀 بدأت المراقبة"}
+
+@app.route("/api/stop_monitoring", methods=["POST"])
+def api_stop_monitoring():
+    user_id = session['user_id']
+    if user_id in USERS:
+        USERS[user_id]['is_running'] = False
+        return {"success": True, "message": "⏹ تم إيقاف المراقبة"}
+    return {"success": False, "message": "❌ لم يتم تشغيل النظام"}
+
+# ===========================
+# SocketIO
+# ===========================
+@socketio.on('join')
+def on_join(data):
+    join_room(session['user_id'])
+
+# ===========================
+# واجهة HTML كاملة
+# ===========================
+INDEX_HTML = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8">
-<title>نظام مراقبة تيليجرام</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نظام مراقبة وإرسال رسائل تيليجرام</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<style>
+body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8f9fa; }
+.card { border-radius:10px; box-shadow:0 4px 6px rgba(0,0,0,0.1);}
+.card-header { background: linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; border-radius:10px 10px 0 0 !important;}
+.log-container { background-color:#000; color:#0f0; font-family: monospace; height:200px; overflow-y:auto; padding:10px; border-radius:5px;}
+.btn-custom { border-radius:25px; padding:10px 30px; font-weight:bold;}
+.form-control { border-radius:10px; }
+</style>
 </head>
 <body>
-<h2>نظام مراقبة وإرسال رسائل تيليجرام</h2>
-
-<div>
-    <label>رقم الهاتف:</label><input id="phone"><br>
-    <label>API ID:</label><input id="api_id"><br>
-    <label>API Hash:</label><input id="api_hash"><br>
-    <label>كلمة المرور (إن وجدت):</label><input id="password"><br>
-    <button onclick="saveSettings()">حفظ البيانات</button>
+<div class="container mt-3">
+    <div class="card p-3">
+        <h4>تسجيل الدخول</h4>
+        <input class="form-control mb-2" id="phone" placeholder="رقم الهاتف">
+        <input class="form-control mb-2" id="api_id" placeholder="API ID">
+        <input class="form-control mb-2" id="api_hash" placeholder="API Hash">
+        <input class="form-control mb-2" id="password" placeholder="كلمة المرور (إن وجدت)">
+        <button class="btn btn-primary btn-custom mb-2" id="loginBtn">موافق</button>
+        <div id="codeContainer" style="display:none;">
+            <input class="form-control mb-2" id="code" placeholder="كود التحقق">
+            <button class="btn btn-success btn-custom" id="codeBtn">موافق</button>
+        </div>
+    </div>
+    <div class="card p-3 mt-3">
+        <h4>إعدادات النظام</h4>
+        <textarea class="form-control mb-2" id="message" placeholder="نص الرسالة"></textarea>
+        <textarea class="form-control mb-2" id="groups" placeholder="روابط المجموعات"></textarea>
+        <input class="form-control mb-2" id="interval" type="number" value="60" placeholder="الفترة الزمنية">
+        <input class="form-control mb-2" id="keywords" placeholder="كلمات المراقبة">
+        <button class="btn btn-primary btn-custom mb-2" id="saveBtn">حفظ البيانات</button>
+        <button class="btn btn-success btn-custom mb-2" id="sendNowBtn">إرسال فوري</button>
+        <button class="btn btn-info btn-custom mb-2" id="sendAutoBtn">إرسال تلقائي</button>
+        <button class="btn btn-warning btn-custom mb-2" id="startBtn">بدء المراقبة</button>
+        <button class="btn btn-danger btn-custom mb-2" id="stopBtn">إيقاف المراقبة</button>
+    </div>
+    <div class="card p-3 mt-3">
+        <h4>سجل العمليات</h4>
+        <div id="log" class="log-container"></div>
+    </div>
 </div>
-
-<div>
-    <label>كود التحقق:</label><input id="code">
-    <button onclick="startLogin()">موافق</button>
-</div>
-
-<div>
-    <label>المجموعات:</label><input id="groups" placeholder="group1,group2"><br>
-    <label>كلمات المراقبة:</label><input id="watch_words" placeholder="كلمة1,كلمة2"><br>
-    <label>نص الرسالة:</label><textarea id="message"></textarea><br>
-    <label>مدة الإرسال/المراقبة بالثواني:</label><input id="interval" value="5"><br>
-    <label>نوع الإرسال:</label>
-    <select id="send_type">
-        <option value="immediate">فوري</option>
-        <option value="automatic">تلقائي</option>
-    </select>
-    <br>
-    <button onclick="startMonitor()">بدء المراقبة</button>
-    <button onclick="stopMonitor()">إيقاف المراقبة</button>
-</div>
-
-<h3>سجل العمليات:</h3>
-<div id="log" style="border:1px solid #000; height:200px; overflow:auto;"></div>
-
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 <script>
-var socket = io();
-var user_id = "";
+const socket = io();
+socket.emit('join',{});
+function addLog(msg){const l=document.getElementById('log');l.innerHTML+='<div>'+msg+'</div>';l.scrollTop=l.scrollHeight;}
 
-socket.on('connect', function(){
-    console.log("متصل بالويب سوكت");
-});
-
-socket.on('session_id', function(data){
-    user_id = data.user_id;
-});
-
-socket.on('log_update', function(data){
-    var log = document.getElementById('log');
-    log.innerHTML += "<div>"+data.message+"</div>";
-    log.scrollTop = log.scrollHeight;
-});
-
-function saveSettings(){
-    fetch('/save_settings', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
+// حفظ البيانات
+document.getElementById('saveBtn').onclick = ()=>{
+    fetch('/api/save_settings',{
+        method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
             phone: document.getElementById('phone').value,
             api_id: document.getElementById('api_id').value,
             api_hash: document.getElementById('api_hash').value,
-            password: document.getElementById('password').value
-        })
-    }).then(res=>res.json()).then(data=>{
-        document.getElementById('log').innerHTML += "<div>"+data.message+"</div>";
-    });
-}
-
-function startLogin(){
-    fetch('/start_login', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({code: document.getElementById('code').value})
-    }).then(res=>res.json()).then(data=>{
-        document.getElementById('log').innerHTML += "<div>"+data.message+"</div>";
-    });
-}
-
-function startMonitor(){
-    fetch('/start_monitor', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-            groups: document.getElementById('groups').value.split(','),
-            watch_words: document.getElementById('watch_words').value.split(','),
+            password: document.getElementById('password').value,
             message: document.getElementById('message').value,
+            groups: document.getElementById('groups').value.split(','),
             interval_seconds: document.getElementById('interval').value,
-            send_type: document.getElementById('send_type').value
+            send_type: 'automatic',
+            watch_words: document.getElementById('keywords').value.split(',')
         })
-    }).then(res=>res.json()).then(data=>{
-        document.getElementById('log').innerHTML += "<div>"+data.message+"</div>";
-    });
+    }).then(r=>r.json()).then(d=>addLog(d.message))
 }
 
-function stopMonitor(){
-    fetch('/stop_monitor', {method:'POST'}).then(res=>res.json()).then(data=>{
-        document.getElementById('log').innerHTML += "<div>"+data.message+"</div>";
-    });
+// بدء المراقبة
+document.getElementById('startBtn').onclick = ()=>{
+    fetch('/api/start_monitoring',{method:'POST'}).then(r=>r.json()).then(d=>addLog(d.message))
 }
+
+// إيقاف المراقبة
+document.getElementById('stopBtn').onclick = ()=>{
+    fetch('/api/stop_monitoring',{method:'POST'}).then(r=>r.json()).then(d=>addLog(d.message))
+}
+
+// تحديث السجل من السيرفر
+socket.on('log_update', data => addLog(data.message))
 </script>
 </body>
 </html>
 """
 
-# -----------------------------
-# API الخلفية
-# -----------------------------
-@app.route("/save_settings", methods=["POST"])
-def save_settings_route():
-    user_id = session['user_id']
-    settings = request.json
-    user_sessions[user_id]['settings'] = settings
-    return {"success": True, "message": "✅ تم حفظ البيانات"}
-
-@app.route("/start_login", methods=["POST"])
-def start_login():
-    user_id = session['user_id']
-    code = request.json.get('code')
-    settings = user_sessions[user_id]['settings']
-    try:
-        client = init_telegram(user_id, settings)
-        client.sign_in(code=code)
-        user_sessions[user_id]['tg_client'] = client
-        return {"success": True, "message": "✅ تم تسجيل الدخول بنجاح"}
-    except Exception as e:
-        return {"success": False, "message": f"❌ خطأ تسجيل الدخول: {str(e)}"}
-
-@app.route("/start_monitor", methods=["POST"])
-def start_monitor():
-    user_id = session['user_id']
-    settings = request.json
-    user_sessions[user_id]['settings'].update(settings)
-    if user_sessions[user_id]['running']:
-        return {"success": False, "message": "النظام يعمل بالفعل"}
-    user_sessions[user_id]['running'] = True
-    thread = threading.Thread(target=start_monitoring, args=(user_id,))
-    user_sessions[user_id]['thread'] = thread
-    thread.start()
-    return {"success": True, "message": "🚀 بدأت المراقبة"}
-
-@app.route("/stop_monitor", methods=["POST"])
-def stop_monitor():
-    user_id = session['user_id']
-    user_sessions[user_id]['running'] = False
-    return {"success": True, "message": "🛑 تم إيقاف المراقبة"}
-
-# -----------------------------
-# تشغيل التطبيق
-# -----------------------------
 if __name__ == "__main__":
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
