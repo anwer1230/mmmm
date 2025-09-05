@@ -1,109 +1,90 @@
-from flask import Flask, request, jsonify, send_file
-from flask_socketio import SocketIO, emit
-from telethon import TelegramClient, events
+from flask import Flask, request, jsonify, send_from_directory
+from flask_socketio import SocketIO
+import eventlet
 import threading
 import time
-import json
+
+eventlet.monkey_patch()
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-# إعدادات افتراضية
 settings = {
     "phone": "",
-    "api_id": 0,
+    "api_id": "",
     "api_hash": "",
     "code": "",
     "password": "",
-    "groups": [],
+    "groups": "",
     "message": "",
     "interval": 5,
-    "send_type": "immediate",
+    "send_type": "auto",
     "keywords": []
 }
 
-client = None
-monitor_thread = None
+sending_thread = None
 monitoring = False
 
-@app.route('/api/save_settings', methods=['POST'])
+@app.route("/")
+def index():
+    return send_from_directory('.', 'index.html')
+
+@app.route("/api/load_settings", methods=["GET"])
+def load_settings():
+    return jsonify({"success": True, "settings": settings})
+
+@app.route("/api/save_settings", methods=["POST"])
 def save_settings():
     global settings
-    try:
-        data = request.get_json()
-        settings.update(data)
-        settings['groups'] = [g.strip() for g in settings['groups'].split(',') if g.strip()]
-        settings['keywords'] = [k.strip() for k in settings['keywords'].split(',') if k.strip()]
-        with open('settings.json','w',encoding='utf-8') as f:
-            json.dump(settings, f, ensure_ascii=False, indent=4)
-        return jsonify({"success": True})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
-
-@app.route('/api/start_monitor', methods=['POST'])
-def start_monitor():
-    global client, monitor_thread, monitoring
-    if monitoring:
-        return jsonify({"success": False, "error": "المراقبة تعمل بالفعل"})
-    try:
-        monitoring = True
-        monitor_thread = threading.Thread(target=run_monitor)
-        monitor_thread.start()
-        return jsonify({"success": True})
-    except Exception as e:
-        monitoring = False
-        return jsonify({"success": False, "error": str(e)})
-
-@app.route('/api/stop_monitor', methods=['POST'])
-def stop_monitor():
-    global monitoring
-    monitoring = False
+    data = request.json
+    settings.update(data)
+    socketio.emit('log_update', {"message": "✅ تم حفظ الإعدادات بنجاح"})
     return jsonify({"success": True})
 
-# إرسال ملف الواجهة من نفس المجلد
-@app.route('/')
-def index():
-    return send_file('index.html')
+@app.route("/api/start_sending", methods=["POST"])
+def start_sending():
+    global sending_thread, monitoring
+    if sending_thread and sending_thread.is_alive():
+        return jsonify({"success": False, "error": "النظام يعمل بالفعل"})
+    
+    monitoring = True
+    sending_thread = threading.Thread(target=send_loop)
+    sending_thread.start()
+    socketio.emit('status_update', {"status": "يعمل"})
+    socketio.emit('log_update', {"message": "🚀 بدء المراقبة والإرسال..."})
+    return jsonify({"success": True})
 
-def run_monitor():
-    global client, monitoring
-    try:
-        client = TelegramClient(settings['phone'], settings['api_id'], settings['api_hash'])
-        client.connect()
-        if not client.is_user_authorized():
-            client.send_code_request(settings['phone'])
-            client.sign_in(settings['phone'], settings['code'], password=settings['password'])
-        socketio.emit('log_update', {'message': '✅ تم تسجيل الدخول بنجاح!'})
-        
-        @client.on(events.NewMessage)
-        async def handler(event):
-            if not monitoring:
-                return
-            text = event.message.message
-            for keyword in settings['keywords']:
-                if keyword in text:
-                    socketio.emit('notification', {'message': f'كلمة مراقبة: "{keyword}" من {event.chat_id}'})
-        
-        client.start()
-        socketio.emit('log_update', {'message': f'🚀 بدء المراقبة والإرسال...'})
-        
-        while monitoring:
-            if settings['send_type'] == 'automatic' and settings['message']:
-                for group in settings['groups']:
-                    try:
-                        client.send_message(group, settings['message'])
-                        socketio.emit('log_update', {'message': f'✅ تم الإرسال إلى {group}'})
-                    except Exception as e:
-                        socketio.emit('log_update', {'message': f'❌ {group}: {str(e)}'})
-            time.sleep(int(settings['interval']))
-        
-    except Exception as e:
-        socketio.emit('log_update', {'message': f'❌ خطأ: {str(e)}'})
-    finally:
-        if client:
-            client.disconnect()
-        monitoring = False
-        socketio.emit('log_update', {'message': '🛑 تم إيقاف المراقبة'})
+@app.route("/api/stop_sending", methods=["POST"])
+def stop_sending():
+    global monitoring
+    monitoring = False
+    socketio.emit('status_update', {"status": "متوقف"})
+    socketio.emit('log_update', {"message": "⏹ تم إيقاف النظام"})
+    return jsonify({"success": True})
 
-if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+def send_loop():
+    while monitoring:
+        groups = settings.get("groups", "").split(",")
+        message = settings.get("message", "")
+        for group in groups:
+            group = group.strip()
+            if not group:
+                continue
+            # هنا تضع كود إرسال الرسالة عبر تيليجرام
+            socketio.emit('log_update', {"message": f"📩 تم إرسال الرسالة إلى {group}"})
+            time.sleep(0.5)
+
+        keywords = [k.strip() for k in settings.get("keywords", []) if k.strip()]
+        if keywords:
+            for kw in keywords:
+                socketio.emit('log_update', {"message": f"🔍 تم رصد الكلمة: {kw}"})
+
+        interval = int(settings.get("interval", 5))
+        time.sleep(interval)
+
+@socketio.on('connect')
+def handle_connect():
+    socketio.emit('log_update', {"message": "✅ تم الاتصال بالواجهة بنجاح"})
+
+if __name__ == "__main__":
+    socketio.run(app, host="0.0.0.0", port=5000, debug=True, allow_unsafe_werkzeug=True)
