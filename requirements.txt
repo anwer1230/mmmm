@@ -1,4 +1,4 @@
-Flask==2.3.4
+Flask==2.3.3
 Flask-SocketIO==6.7.2
 telethon==1.29.0
 eventlet==0.33.3
