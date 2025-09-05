@@ -1,233 +1,109 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_socketio import SocketIO, emit
-import asyncio
-import threading
-import json
-import os
-from datetime import datetime
 from telethon import TelegramClient, events
+import threading
+import time
+import json
 
-# مسار الواجهة مثل الكود الأصلي
-app = Flask(__name__, template_folder='.')
-app.config['SECRET_KEY'] = 'telegram-gui-secret'
+app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# متغيرات النظام
+# إعدادات افتراضية
+settings = {
+    "phone": "",
+    "api_id": 0,
+    "api_hash": "",
+    "code": "",
+    "password": "",
+    "groups": [],
+    "message": "",
+    "interval": 5,
+    "send_type": "immediate",
+    "keywords": []
+}
+
 client = None
-is_running = False
-current_settings = {}
-
-# الكلمات المراد مراقبتها
-WATCH_WORDS = [
-    "اريد مساعدة","عندي واجب","من يسوي سكليف","حل واجب","مساعدة","واجبات",
-    "بحث","تقرير","مشروع","اسايمنت","ابي مساعدة","عندي اختبار","من يقدر",
-    "تعرفون شخص","محتاج مساعدة","بحث جامعي","تصميم","برمجة","ترجمة","كتابة محتوى"
-]
-
-# المجموعات المستهدفة للبث
-GROUPS = [
-    "skdjfu", "Maths_genius2", "mtager545", "sultanu1999", "salla_pool",
-    "Taif64", "groupIAU", "universty_taif11", "ksucpy", "Tu_English2",
-    "bsfmisk", "httpsLjsIIb3S3nIwMzVk", "bdydbeu", "sdgghjklv",
-    "DigitalSAMAA", "tabuk_2022", "KearneyMiddleEast", "jazanh12",
-    "YouthGrowthProgramYGP"
-]
-
-def log_message(message):
-    """إرسال رسالة إلى السجل"""
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    log_entry = f"[{timestamp}] {message}"
-    socketio.emit('log_update', {'message': log_entry})
-    print(log_entry)
-
-def update_status(status):
-    """تحديث حالة النظام"""
-    socketio.emit('status_update', {'status': status})
-
-@app.route('/')
-def index():
-    return render_template('index.html')
+monitor_thread = None
+monitoring = False
 
 @app.route('/api/save_settings', methods=['POST'])
 def save_settings():
-    """حفظ الإعدادات"""
-    global current_settings
+    global settings
     try:
-        current_settings = request.get_json()
-        # حفظ في ملف
-        with open("web_settings.json", "w", encoding="utf-8") as f:
-            json.dump(current_settings, f, ensure_ascii=False, indent=2)
-        log_message("✅ تم حفظ الإعدادات بنجاح")
-        return jsonify({"success": True, "message": "تم حفظ الإعدادات"})
-    except Exception as e:
-        log_message(f"❌ خطأ في حفظ الإعدادات: {str(e)}")
-        return jsonify({"success": False, "error": str(e)})
-
-@app.route('/api/load_settings')
-def load_settings():
-    """تحميل الإعدادات"""
-    try:
-        if os.path.exists("web_settings.json"):
-            with open("web_settings.json", "r", encoding="utf-8") as f:
-                settings = json.load(f)
-            return jsonify({"success": True, "settings": settings})
-        else:
-            default_settings = {
-                "phone": "",
-                "api_id": "",
-                "api_hash": "",
-                "code": "",  # هذه الخانة لن تظهر أثناء التشغيل
-                "password": "",
-                "interval": "5",  # الوقت بالثواني
-                "message": "اكتب رسالتك هنا..."
-            }
-            return jsonify({"success": True, "settings": default_settings})
+        data = request.get_json()
+        settings.update(data)
+        settings['groups'] = [g.strip() for g in settings['groups'].split(',') if g.strip()]
+        settings['keywords'] = [k.strip() for k in settings['keywords'].split(',') if k.strip()]
+        with open('settings.json','w',encoding='utf-8') as f:
+            json.dump(settings, f, ensure_ascii=False, indent=4)
+        return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
-@app.route('/api/start_sending', methods=['POST'])
-def start_sending():
-    """بدء الإرسال"""
-    global is_running, current_settings
+@app.route('/api/start_monitor', methods=['POST'])
+def start_monitor():
+    global client, monitor_thread, monitoring
+    if monitoring:
+        return jsonify({"success": False, "error": "المراقبة تعمل بالفعل"})
     try:
-        current_settings = request.get_json()
-        required_fields = ['phone', 'api_id', 'api_hash']
-        for field in required_fields:
-            if not current_settings.get(field):
-                return jsonify({"success": False, "error": f"حقل {field} مطلوب"})
-        if is_running:
-            return jsonify({"success": False, "error": "النظام يعمل بالفعل"})
-        is_running = True
-        update_status("يعمل")
-        log_message("🚀 بدء نظام الإرسال...")
-        thread = threading.Thread(target=run_telegram_client, daemon=True)
-        thread.start()
-        return jsonify({"success": True, "message": "تم بدء النظام"})
+        monitoring = True
+        monitor_thread = threading.Thread(target=run_monitor)
+        monitor_thread.start()
+        return jsonify({"success": True})
     except Exception as e:
-        log_message(f"❌ خطأ في بدء النظام: {str(e)}")
+        monitoring = False
         return jsonify({"success": False, "error": str(e)})
 
-@app.route('/api/stop_sending', methods=['POST'])
-def stop_sending():
-    """إيقاف الإرسال"""
-    global is_running, client
+@app.route('/api/stop_monitor', methods=['POST'])
+def stop_monitor():
+    global monitoring
+    monitoring = False
+    return jsonify({"success": True})
+
+# إرسال ملف الواجهة من نفس المجلد
+@app.route('/')
+def index():
+    return send_file('index.html')
+
+def run_monitor():
+    global client, monitoring
     try:
-        is_running = False
-        update_status("متوقف")
-        log_message("⏹️ تم إيقاف النظام")
-        if client:
-            try:
-                asyncio.create_task(client.disconnect())
-            except:
-                pass
-        return jsonify({"success": True, "message": "تم إيقاف النظام"})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
-
-@app.route('/api/test_send', methods=['POST'])
-def test_send():
-    """إرسال تجريبي"""
-    global client, current_settings
-    try:
-        if not client:
-            return jsonify({"success": False, "error": "يجب تسجيل الدخول أولاً"})
-        current_settings = request.get_json()
-        test_group = "Maths_genius2"
-        thread = threading.Thread(target=send_test_message, args=(test_group,), daemon=True)
-        thread.start()
-        return jsonify({"success": True, "message": "جاري الإرسال التجريبي..."})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
-
-def send_test_message(group):
-    """إرسال رسالة تجريبية"""
-    async def _send():
-        try:
-            message = current_settings.get('message', '')
-            await client.send_message(group, message, parse_mode='markdown')
-            log_message(f"✅ تم إرسال رسالة تجريبية إلى {group}")
-        except Exception as e:
-            log_message(f"❌ فشل الإرسال التجريبي: {str(e)}")
-    asyncio.run(_send())
-
-def run_telegram_client():
-    """تشغيل عميل تيليجرام"""
-    asyncio.run(telegram_main())
-
-async def telegram_main():
-    """الدالة الرئيسية لتيليجرام"""
-    global client
-    try:
-        if not os.path.exists("sessions"):
-            os.makedirs("sessions")
-        phone = current_settings['phone']
-        api_id = int(current_settings['api_id'])
-        api_hash = current_settings['api_hash']
-        code = current_settings.get('code', '')
-        password = current_settings.get('password', '')
-        session_name = f"sessions/{phone.replace('+', '')}"
-        client = TelegramClient(session_name, api_id, api_hash)
-        log_message("🔹 جاري الاتصال بتيليجرام...")
-        await client.connect()
-        if not await client.is_user_authorized():
-            await client.send_code_request(phone)
-            log_message("🔹 تم إرسال كود التحقق")
-            try:
-                if code:
-                    await client.sign_in(phone, code)
-                elif password:
-                    await client.sign_in(password=password)
-            except Exception as e:
-                log_message(f"❌ خطأ في التحقق: {str(e)}")
-                return
-        log_message("✅ تم تسجيل الدخول بنجاح!")
-
-        # ----- إضافة المراقبة لكامل الحساب -----
-        @client.on(events.NewMessage())
+        client = TelegramClient(settings['phone'], settings['api_id'], settings['api_hash'])
+        client.connect()
+        if not client.is_user_authorized():
+            client.send_code_request(settings['phone'])
+            client.sign_in(settings['phone'], settings['code'], password=settings['password'])
+        socketio.emit('log_update', {'message': '✅ تم تسجيل الدخول بنجاح!'})
+        
+        @client.on(events.NewMessage)
         async def handler(event):
-            message_text = event.message.message.lower()
-            for word in WATCH_WORDS:
-                if word.lower() in message_text:
-                    sender = getattr(event.chat, 'title', None) or getattr(event.chat, 'username', None) or "محادثة خاصة"
-                    alert_msg = f"⚠️ كلمة '{word}' تم ذكرها في {sender}\n\nالمحتوى: {event.message.message}"
-                    log_message(alert_msg)
-                    await client.send_message('me', alert_msg)
-                    break
-
-        # بدء الإرسال المستمر
-        await continuous_sending()
-
+            if not monitoring:
+                return
+            text = event.message.message
+            for keyword in settings['keywords']:
+                if keyword in text:
+                    socketio.emit('notification', {'message': f'كلمة مراقبة: "{keyword}" من {event.chat_id}'})
+        
+        client.start()
+        socketio.emit('log_update', {'message': f'🚀 بدء المراقبة والإرسال...'})
+        
+        while monitoring:
+            if settings['send_type'] == 'automatic' and settings['message']:
+                for group in settings['groups']:
+                    try:
+                        client.send_message(group, settings['message'])
+                        socketio.emit('log_update', {'message': f'✅ تم الإرسال إلى {group}'})
+                    except Exception as e:
+                        socketio.emit('log_update', {'message': f'❌ {group}: {str(e)}'})
+            time.sleep(int(settings['interval']))
+        
     except Exception as e:
-        log_message(f"❌ خطأ في النظام: {str(e)}")
+        socketio.emit('log_update', {'message': f'❌ خطأ: {str(e)}'})
     finally:
         if client:
-            await client.disconnect()
-
-async def continuous_sending():
-    """الإرسال المستمر للرسائل"""
-    global is_running
-    while is_running:
-        try:
-            message = current_settings.get('message', '')
-            log_message(f"🚀 بدء البث إلى {len(GROUPS)} مجموعة...")
-            success_count = 0
-            for group in GROUPS:
-                if not is_running:
-                    break
-                try:
-                    await client.send_message(group, message, parse_mode='markdown')
-                    log_message(f"✅ {group}")
-                    success_count += 1
-                except Exception as e:
-                    log_message(f"❌ {group}: {str(e)[:50]}...")
-                await asyncio.sleep(2)
-            log_message(f"📊 انتهى البث: {success_count}/{len(GROUPS)} رسالة")
-            interval_seconds = int(current_settings.get('interval', 5))
-            log_message(f"⏰ انتظار {interval_seconds} ثانية...")
-            await asyncio.sleep(interval_seconds)
-        except Exception as e:
-            log_message(f"❌ خطأ في الإرسال: {str(e)}")
-            await asyncio.sleep(10)
+            client.disconnect()
+        monitoring = False
+        socketio.emit('log_update', {'message': '🛑 تم إيقاف المراقبة'})
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
