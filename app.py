@@ -1,90 +1,117 @@
-from flask import Flask, request, jsonify, send_from_directory
-from flask_socketio import SocketIO
-import eventlet
+from flask import Flask, request, send_file, jsonify
+from flask_socketio import SocketIO, emit
+from telethon import TelegramClient
 import threading
 import time
+import json
+import os
 
-eventlet.monkey_patch()
-
+# -----------------------------
+# بيانات التطبيق
+# -----------------------------
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
+SETTINGS_FILE = "settings.json"
 
-settings = {
-    "phone": "",
-    "api_id": "",
-    "api_hash": "",
-    "code": "",
-    "password": "",
-    "groups": "",
-    "message": "",
-    "interval": 5,
-    "send_type": "auto",
-    "keywords": []
-}
+is_running = False
+monitoring_thread = None
+tg_client = None
 
-sending_thread = None
-monitoring = False
+# -----------------------------
+# وظائف التحميل والحفظ
+# -----------------------------
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
+def save_settings(settings):
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=4)
+
+# -----------------------------
+# إعداد تيليجرام
+# -----------------------------
+def init_telegram(settings):
+    global tg_client
+    if tg_client is None:
+        tg_client = TelegramClient(
+            'session', 
+            settings['api_id'], 
+            settings['api_hash']
+        )
+        tg_client.start(phone=settings['phone'], password=settings['password'], code_callback=lambda: settings['code'])
+
+# -----------------------------
+# وظيفة المراقبة/الإرسال
+# -----------------------------
+def start_monitoring(settings):
+    global is_running
+    init_telegram(settings)
+
+    while is_running:
+        groups = settings.get("groups", [])
+        message = settings.get("message", "")
+        watch_words = settings.get("watch_words", [])
+        interval = int(settings.get("interval_seconds", 5))
+
+        # إرسال الرسائل إلى المجموعات
+        for group in groups:
+            try:
+                tg_client.send_message(group, message)
+                socketio.emit('log_update', {"message": f"🚀 تم إرسال الرسالة إلى {group}"})
+            except Exception as e:
+                socketio.emit('log_update', {"message": f"❌ {group}: {str(e)}"})
+        
+        # إرسال التنبيهات الخاصة إلى الحساب نفسه
+        for word in watch_words:
+            try:
+                tg_client.send_message('me', f"🔔 تم رصد كلمة المراقبة: {word}")
+                socketio.emit('log_update', {"message": f"🔔 تم إرسال التنبيه إلى حسابك الشخصي: {word}"})
+            except Exception as e:
+                socketio.emit('log_update', {"message": f"❌ خطأ في إرسال التنبيه: {str(e)}"})
+
+        time.sleep(interval)
+
+# -----------------------------
+# الراوتات
+# -----------------------------
 @app.route("/")
 def index():
-    return send_from_directory('.', 'index.html')
+    return send_file("index.html")
 
-@app.route("/api/load_settings", methods=["GET"])
-def load_settings():
+@app.route("/api/load_settings")
+def api_load_settings():
+    settings = load_settings()
     return jsonify({"success": True, "settings": settings})
 
 @app.route("/api/save_settings", methods=["POST"])
-def save_settings():
-    global settings
+def api_save_settings():
     data = request.json
-    settings.update(data)
-    socketio.emit('log_update', {"message": "✅ تم حفظ الإعدادات بنجاح"})
+    save_settings(data)
     return jsonify({"success": True})
 
-@app.route("/api/start_sending", methods=["POST"])
-def start_sending():
-    global sending_thread, monitoring
-    if sending_thread and sending_thread.is_alive():
+@app.route("/api/start_monitoring", methods=["POST"])
+def api_start_monitoring():
+    global is_running, monitoring_thread
+    if is_running:
         return jsonify({"success": False, "error": "النظام يعمل بالفعل"})
-    
-    monitoring = True
-    sending_thread = threading.Thread(target=send_loop)
-    sending_thread.start()
-    socketio.emit('status_update', {"status": "يعمل"})
-    socketio.emit('log_update', {"message": "🚀 بدء المراقبة والإرسال..."})
+    settings = request.json
+    save_settings(settings)
+    is_running = True
+    monitoring_thread = threading.Thread(target=start_monitoring, args=(settings,))
+    monitoring_thread.start()
     return jsonify({"success": True})
 
-@app.route("/api/stop_sending", methods=["POST"])
-def stop_sending():
-    global monitoring
-    monitoring = False
-    socketio.emit('status_update', {"status": "متوقف"})
-    socketio.emit('log_update', {"message": "⏹ تم إيقاف النظام"})
+@app.route("/api/stop_monitoring", methods=["POST"])
+def api_stop_monitoring():
+    global is_running
+    is_running = False
     return jsonify({"success": True})
 
-def send_loop():
-    while monitoring:
-        groups = settings.get("groups", "").split(",")
-        message = settings.get("message", "")
-        for group in groups:
-            group = group.strip()
-            if not group:
-                continue
-            # هنا تضع كود إرسال الرسالة عبر تيليجرام
-            socketio.emit('log_update', {"message": f"📩 تم إرسال الرسالة إلى {group}"})
-            time.sleep(0.5)
-
-        keywords = [k.strip() for k in settings.get("keywords", []) if k.strip()]
-        if keywords:
-            for kw in keywords:
-                socketio.emit('log_update', {"message": f"🔍 تم رصد الكلمة: {kw}"})
-
-        interval = int(settings.get("interval", 5))
-        time.sleep(interval)
-
-@socketio.on('connect')
-def handle_connect():
-    socketio.emit('log_update', {"message": "✅ تم الاتصال بالواجهة بنجاح"})
-
+# -----------------------------
+# تشغيل التطبيق
+# -----------------------------
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True, allow_unsafe_werkzeug=True)
+    socketio.run(app, host="0.0.0.0", port=5000)
