@@ -242,5 +242,8 @@ socket.on('log_update', data => addLog(data.message))
 # ===========================
 # تشغيل السيرفر
 # ===========================
-if __name__ == "__main__":
+ if __name__ == "__main__":
+    import eventlet
+    eventlet.monkey_patch()
     socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+
