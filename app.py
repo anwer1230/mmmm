@@ -1,24 +1,27 @@
 # ===========================
-# تفعيل eventlet أولًا قبل أي استيراد
+# استيراد المكتبات
 # ===========================
+import os, json, uuid, threading
+from flask import Flask, session, request, render_template_string
+from flask_socketio import SocketIO, emit, join_room
+import asyncio
+
+# ======= تفعيل eventlet قبل أي استيراد آخر =======
 import eventlet
 eventlet.monkey_patch()
 
-# ===========================
-# الاستيرادات
-# ===========================
-from flask import Flask, session, request, render_template_string
-from flask_socketio import SocketIO, emit, join_room
 from telethon import TelegramClient, events
-import threading, asyncio, os, json, uuid
 
 # ===========================
-# إعداد التطبيق
+# إعداد Flask و SocketIO
 # ===========================
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
+# ===========================
+# إعداد الملفات والمستخدمين
+# ===========================
 SESSIONS_DIR = "sessions"
 if not os.path.exists(SESSIONS_DIR):
     os.makedirs(SESSIONS_DIR)
@@ -158,7 +161,7 @@ def on_join(data):
     join_room(session['user_id'])
 
 # ===========================
-# واجهة HTML
+# واجهة HTML كاملة
 # ===========================
 INDEX_HTML = """
 <!DOCTYPE html>
@@ -186,7 +189,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-
         <input class="form-control mb-2" id="api_id" placeholder="API ID">
         <input class="form-control mb-2" id="api_hash" placeholder="API Hash">
         <input class="form-control mb-2" id="password" placeholder="كلمة المرور (إن وجدت)">
-        <button class="btn btn-primary btn-custom mb-2" id="saveBtn">حفظ البيانات</button>
+        <button class="btn btn-primary btn-custom mb-2" id="loginBtn">موافق</button>
     </div>
     <div class="card p-3 mt-3">
         <h4>إعدادات النظام</h4>
@@ -194,6 +197,7 @@ body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-
         <textarea class="form-control mb-2" id="groups" placeholder="روابط المجموعات (افصل بينهم بفواصل)"></textarea>
         <input class="form-control mb-2" id="interval" type="number" value="60" placeholder="الفترة الزمنية">
         <input class="form-control mb-2" id="keywords" placeholder="كلمات المراقبة (افصل بينهم بفواصل)">
+        <button class="btn btn-primary btn-custom mb-2" id="saveBtn">حفظ البيانات</button>
         <button class="btn btn-success btn-custom mb-2" id="sendNowBtn">إرسال فوري</button>
         <button class="btn btn-info btn-custom mb-2" id="sendAutoBtn">إرسال تلقائي</button>
         <button class="btn btn-warning btn-custom mb-2" id="startBtn">بدء المراقبة</button>
