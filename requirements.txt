@@ -1,7 +1,6 @@
 Flask==2.3.3
 Flask-SocketIO==5.5.1
-telethon==1.41.2
+telethon==1.27.5
 eventlet==0.33.3
 requests==2.31.0
 gunicorn==21.2.0
-setuptools>=68.0.0
