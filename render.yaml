@@ -2,13 +2,11 @@ services:
   - type: web
     name: telegram-monitor
     env: python
-    plan: free  # يمكنك تغييره إلى خطة مدفوعة إذا أردت
-    buildCommand: |
-      python -m pip install --upgrade pip
-      pip install -r requirements.txt
-    startCommand: gunicorn -k eventlet -w 1 app:app
-    pythonVersion: 3.13
-    autoDeploy: true
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python app.py"
     envVars:
-      - key: FLASK_ENV
-        value: production
+      - key: PORT
+        value: "10000"
